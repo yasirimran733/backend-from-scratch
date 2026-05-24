@@ -24,14 +24,13 @@ class Data:
 
     async def findUser(self, user):
         result = await self.db.execute(
-            "SELECT username,password FROM users WHERE users.username = ? AND users.password = ?",
-            (user.username, user.password),
+            "SELECT username,password FROM users WHERE users.username = ?", (user.username,)
         )
         return await result.fetchone()
 
     async def storeUser(self, user):
         await self.db.execute(
-            "INSERT OR REPLACE INTO users(username,password) VALUES (?,?)",
+            "INSERT INTO users(username,password) VALUES (?,?)",
             (user.username, user.password),
         )
         await self.db.commit()
@@ -40,12 +39,17 @@ class Data:
 # Auth Manager
 class Auth:
     def __init__(self):
-        self.data = Data("")
+        self.db = None
+        self.data = None
 
     async def initialize(self, filePath):
-        async with aiosqlite.connect(filePath) as db:
-            self.data = Data(db)
-            await self.data.initializeDB()
+        self.db  = await aiosqlite.connect(filePath)
+        self.data = Data(self.db)
+        await self.data.initializeDB()
+
+    async def closeDB(self):
+        assert self.db is not None
+        await self.db.close()
 
     async def register(self, user):
         result = await self.data.findUser(user)
@@ -53,6 +57,7 @@ class Auth:
             print("User already Exists")
             return False
         else:
+            
             await self.data.storeUser(user)
             print("User Registered Successfully")
             return True
@@ -62,12 +67,14 @@ class Auth:
         if result is None:
             print("User Does not Exists")
             return False
+        elif result[1] != user.password:
+            print("Passoword is Worng!. Try Again")
+            return False
         else:
             user.isLogin = True
             print("User logged in Successfully")
             return True
-
-
+  
 # User class
 class User:
     def __init__(self, username, password):
@@ -75,14 +82,14 @@ class User:
         self.password = password
         self.isLogin = False
 
-    def verifyLogin(self, user):
-        return user.isLogin
+    def verifyLogin(self):
+        return self.isLogin
 
 
 def login_required(func):
-    def wrapper(user):
-        if user.isLogin == True:
-            return func(user)
+    def wrapper(*args,**kwargs):
+        if args[0].isLogin == True:
+            return func(*args,**kwargs)
         else:
             print("User is not authenticated")
 
@@ -99,7 +106,7 @@ auth = Auth()
 asyncio.run(auth.initialize("users.db"))
 user1 = User("yas", "782")
 asyncio.run(auth.register(user))
-asyncio.run(auth.login(user1))
+asyncio.run(auth.login(user))
+asyncio.run(auth.closeDB())
 
-
-dashboard(user1)
+dashboard(user)
