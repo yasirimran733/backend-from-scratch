@@ -1,12 +1,8 @@
-# authentication decoration, reusable everywhere , no need to write logic again and again
-# Complete auth flow without db
-
 import aiosqlite
 import asyncio
-import uuid
 
 
-# Data Manager
+# Db handling 
 class Data:
     def __init__(self, db):
         self.db = db
@@ -14,99 +10,121 @@ class Data:
     async def initializeDB(self):
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT UNIQUE,
-            password TEXT                                                      
-            )    
+                id INTEGER PRIMARY KEY,
+                username TEXT UNIQUE,
+                password TEXT
+            )
         """)
         await self.db.commit()
         print("Table Created Successfully")
 
-    async def findUser(self, user):
-        result = await self.db.execute(
-            "SELECT username,password FROM users WHERE users.username = ?", (user.username,)
+    async def findUserByUsername(self, username):
+        cursor = await self.db.execute(
+            "SELECT username, password FROM users WHERE username = ?",
+            (username,)
         )
-        return await result.fetchone()
+        return await cursor.fetchone()
 
-    async def storeUser(self, user):
+    async def storeUser(self, username, password):
         await self.db.execute(
-            "INSERT INTO users(username,password) VALUES (?,?)",
-            (user.username, user.password),
+            "INSERT INTO users(username, password) VALUES (?, ?)",
+            (username, password),
         )
         await self.db.commit()
 
 
-# Auth Manager
+# Auth business logic
 class Auth:
     def __init__(self):
         self.db = None
         self.data = None
 
     async def initialize(self, filePath):
-        self.db  = await aiosqlite.connect(filePath)
+        self.db = await aiosqlite.connect(filePath) # db object life time
         self.data = Data(self.db)
         await self.data.initializeDB()
 
+    def _ensure_initialized(self):   # check if auth initiazlize table
+        if self.data is None:
+            raise RuntimeError("Auth not initialized. Call initialize() first.")
+
     async def closeDB(self):
-        assert self.db is not None
-        await self.db.close()
+        if self.db:
+            await self.db.close()
 
     async def register(self, user):
-        result = await self.data.findUser(user)
-        if result is not None:
-            print("User already Exists")
+        self._ensure_initialized()
+
+        existing = await self.data.findUserByUsername(user.username)
+
+        if existing:
+            print("User already exists")
             return False
-        else:
-            
-            await self.data.storeUser(user)
-            print("User Registered Successfully")
-            return True
+
+        await self.data.storeUser(user.username, user.password)
+        print("User Registered Successfully")
+        return True
 
     async def login(self, user):
-        result = await self.data.findUser(user)
-        if result is None:
-            print("User Does not Exists")
+        self._ensure_initialized()
+
+        row = await self.data.findUserByUsername(user.username)
+
+        if row is None:
+            print("User does not exist")
             return False
-        elif result[1] != user.password:
-            print("Passoword is Worng!. Try Again")
+
+        db_username, db_password = row
+
+        if db_password != user.password:
+            print("Wrong password")
             return False
-        else:
-            user.isLogin = True
-            print("User logged in Successfully")
-            return True
-  
-# User class
+
+        user.isLogin = True
+        print("User logged in successfully")
+        return True
+
+
+# user class
 class User:
     def __init__(self, username, password):
         self.username = username
         self.password = password
         self.isLogin = False
 
-    def verifyLogin(self):
-        return self.isLogin
 
-
+# Login required decorator
 def login_required(func):
-    def wrapper(*args,**kwargs):
-        if args[0].isLogin == True:
-            return func(*args,**kwargs)
-        else:
+    def wrapper(*args, **kwargs):
+        user = args[0]  # assumes first argument is user
+
+        if not hasattr(user, "isLogin") or not user.isLogin:
             print("User is not authenticated")
+            return None
+
+        return func(*args, **kwargs)
 
     return wrapper
 
 
 @login_required
 def dashboard(user):
-    print("Welcome to dashboard")
+    print(f"Welcome {user.username} to dashboard")
 
 
-user = User("yasir", "786")
-auth = Auth()
-asyncio.run(auth.initialize("users.db"))
-user1 = User("yas", "782")
-asyncio.run(auth.register(user))
-asyncio.run(auth.login(user))
-asyncio.run(auth.closeDB())
+# main flow
+async def main():
+    auth = Auth()
+    await auth.initialize("users.db")
 
-dashboard(user)
+    user1 = User("yasir", "786")
+
+    await auth.register(user1)
+    await auth.login(user1)
+
+    dashboard(user1)
+
+    await auth.closeDB()
+
+
+asyncio.run(main())
