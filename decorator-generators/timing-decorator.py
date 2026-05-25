@@ -13,5 +13,5 @@ def timer(func):
 def counter(n):
     while n > 0:
         n-=1
-
+# Time to execute 
 counter(100000000)        
